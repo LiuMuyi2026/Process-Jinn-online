@@ -39,6 +39,11 @@ export interface Strategy {
 
 export type AppStage = 'INPUT' | 'PROCESSING' | 'SELECTION' | 'PROCESS' | 'HISTORY';
 
+export interface LocalUser {
+  id: string;
+  email: string;
+}
+
 export interface GoalState {
   description: string;
   quantification: string;
@@ -51,7 +56,7 @@ export interface GoalState {
   loading: boolean;
   error: string | null;
   language: Language;
-  user: any | null; // Supabase User type would be better but keeping it simple for now
+  user: LocalUser | null;
   history: StoredPlan[];
   selectedPlanId: string | null;
 }

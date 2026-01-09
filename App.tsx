@@ -1,13 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { generateStrategies, expandStep, generateResourcePlan, generateStrategyPlan, regenerateStepText, regenerateFutureSteps } from './services/geminiService';
-import { GoalState, Step, Resource, PlanItem, Strategy, Language } from './types';
-import { Wand2, Layers, Loader2, ArrowRight, ArrowLeft, Copy, Download, Check, LogIn, LogOut, History, Calendar } from './components/Icons';
-import { StepList } from './components/StepList';
-import { ResourcePanel } from './components/ResourcePanel';
+import { GoalState, Step, Resource, PlanItem, Strategy, Language, StoredPlan } from './types';
 import { AuthModal } from './components/AuthModal';
 import { getTranslation } from './translations';
-import { supabase } from './supabase';
-import { getUserPlans, signOut, savePlan, updateStepStatus } from './services/dbService';
+import { getUserPlans, signOut, savePlan, updateStepStatus, getSessionUser } from './services/dbService';
+
+// Extracted Components
+import { Header } from './components/Header';
+import { InputScreen } from './components/InputScreen';
+import { ProcessingScreen } from './components/ProcessingScreen';
+import { SelectionScreen } from './components/SelectionScreen';
+import { HistoryScreen } from './components/HistoryScreen';
+import { ProcessScreen } from './components/ProcessScreen';
 
 const App: React.FC = () => {
   const [state, setState] = useState<GoalState>({
@@ -54,26 +58,13 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [state.loading, state.language]); // Reset when language changes
 
-  // Auth Listener
+  // Check session on mount
   useEffect(() => {
-    // Check current session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setState(prev => ({ ...prev, user: session?.user ?? null }));
-      if (session?.user) {
-        fetchHistory(session.user.id);
-      }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setState(prev => ({ ...prev, user: session?.user ?? null }));
-      if (session?.user) {
-        fetchHistory(session.user.id);
-      } else {
-        setState(prev => ({ ...prev, history: [] }));
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    const user = getSessionUser();
+    if (user) {
+      setState(prev => ({ ...prev, user }));
+      fetchHistory(user.id);
+    }
   }, []);
 
   const fetchHistory = async (userId: string) => {
@@ -631,420 +622,96 @@ const App: React.FC = () => {
 
   // --- Render Sections ---
 
-  const renderHeader = () => (
-    <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-white/70 border-b border-slate-200 supports-[backdrop-filter]:bg-white/60">
-      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2 cursor-pointer group" onClick={handleReset}>
-          <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-1.5 rounded-lg text-white shadow-md shadow-indigo-500/20 group-hover:shadow-indigo-500/40 transition-shadow">
-            <Wand2 className="w-5 h-5" />
-          </div>
-          <h1 className="text-xl font-bold tracking-tight text-slate-800 group-hover:text-indigo-600 transition-colors">{t.appTitle}</h1>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <button
-            onClick={toggleLanguage}
-            className="text-sm font-semibold text-slate-600 hover:text-indigo-600 px-3 py-1.5 rounded-md hover:bg-slate-100 transition-colors border border-transparent hover:border-indigo-100"
-          >
-            {state.language === 'en' ? '中文' : 'English'}
-          </button>
-
-          {state.stage !== 'INPUT' && state.stage !== 'PROCESSING' && (
-            <button
-              onClick={handleReset}
-              className="px-4 py-2 rounded-full text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-            >
-              {t.newGoal}
-            </button>
-          )}
-
-          <div className="h-6 w-px bg-slate-200"></div>
-
-          {state.user ? (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setState(prev => ({ ...prev, stage: 'HISTORY' }))}
-                className="flex items-center gap-2 p-2 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-indigo-600 transition-all"
-                title="My Plans"
-              >
-                <History className="w-5 h-5" />
-              </button>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">
-                  {state.user.email?.[0].toUpperCase()}
-                </div>
-                <button
-                  onClick={() => signOut()}
-                  className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all"
-                  title="Sign Out"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setIsAuthModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all shadow-md shadow-indigo-200"
-            >
-              <LogIn className="w-4 h-4" /> <span>Sign In</span>
-            </button>
-          )}
-        </div>
-      </div>
-    </header>
-  );
-
-  const renderInputScreen = () => (
-    <div className="max-w-2xl mx-auto space-y-8 pt-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="text-center space-y-4">
-        <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight sm:text-5xl">
-          {t.inputTitle}
-        </h2>
-        <p className="text-lg text-slate-600 max-w-lg mx-auto leading-relaxed">
-          {t.inputSubtitle}
-        </p>
-      </div>
-
-      <div className="bg-white p-2 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-200">
-        <div className="p-6 space-y-6">
-          <div className="space-y-2">
-            <label htmlFor="goal" className="block text-sm font-semibold text-slate-700">{t.labelGoal}</label>
-            <textarea
-              id="goal"
-              placeholder={t.placeholderGoal}
-              className="w-full p-4 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all resize-none h-32 text-lg placeholder:text-slate-400"
-              value={state.description}
-              onChange={(e) => setState(prev => ({ ...prev, description: e.target.value }))}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label htmlFor="quantification" className="block text-sm font-semibold text-slate-700">{t.labelSpecifics} <span className="text-slate-400 font-normal">{t.labelOptional}</span></label>
-              <input
-                id="quantification"
-                type="text"
-                placeholder={t.placeholderSpecifics}
-                className="w-full p-4 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                value={state.quantification}
-                onChange={(e) => setState(prev => ({ ...prev, quantification: e.target.value }))}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="environment" className="block text-sm font-semibold text-slate-700">{t.labelEnvironment} <span className="text-slate-400 font-normal">{t.labelOptional}</span></label>
-              <input
-                id="environment"
-                type="text"
-                placeholder={t.placeholderEnvironment}
-                className="w-full p-4 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                value={state.environment}
-                onChange={(e) => setState(prev => ({ ...prev, environment: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <button
-            onClick={handleGenerate}
-            disabled={!state.description.trim()}
-            className="w-full py-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold text-lg rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2 group relative overflow-hidden"
-          >
-            <span className="relative z-10 flex items-center gap-2">
-              {t.btnGenerate} <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </span>
-            <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-violet-600 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-          </button>
-        </div>
-
-        {state.error && (
-          <div className="p-4 bg-red-50 text-red-600 text-sm text-center rounded-b-2xl border-t border-red-100">
-            {state.error}
-          </div>
-        )}
-      </div>
-
-      <div className="text-center">
-        <p className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">{t.examplesLabel}</p>
-        <div className="flex flex-wrap justify-center gap-2">
-          {t.examples.map(ex => (
-            <button
-              key={ex}
-              onClick={() => setState(prev => ({ ...prev, description: ex }))}
-              className="px-4 py-2 bg-white border border-slate-200 rounded-full text-sm text-slate-600 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50 transition-all shadow-sm"
-            >
-              {ex}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderProcessingScreen = () => (
-    <div className="max-w-xl mx-auto pt-32 text-center animate-in fade-in duration-700">
-      <div className="relative w-24 h-24 mx-auto mb-10">
-        <div className="absolute inset-0 border-[6px] border-slate-100 rounded-full"></div>
-        <div className="absolute inset-0 border-[6px] border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <Wand2 className="w-8 h-8 text-indigo-500 animate-pulse" />
-        </div>
-      </div>
-      <h2 className="text-2xl font-bold text-slate-800 mb-3 min-h-[2rem]">
-        {state.selectedStrategyId ? t.loadingPlan : LOADING_MESSAGES[loadingMsgIndex]}
-      </h2>
-      <p className="text-slate-500">
-        {state.selectedStrategyId ? "" : "This might take a moment as we calculate the best path."}
-      </p>
-    </div>
-  );
-
-  const renderSelectionScreen = () => (
-    <div className="max-w-6xl mx-auto pt-8 space-y-10 animate-in slide-in-from-bottom-8 duration-500">
-      <div className="text-center space-y-3">
-        <h2 className="text-3xl font-bold text-slate-900">{t.selectionTitle}</h2>
-        <p className="text-slate-600 text-lg">{t.selectionSubtitle}</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {state.strategies.map((strategy, idx) => (
-          <div
-            key={strategy.id}
-            className="group relative bg-white rounded-2xl border border-slate-200 hover:border-indigo-200 shadow-sm hover:shadow-xl hover:shadow-indigo-100/50 transition-all duration-300 flex flex-col h-full overflow-hidden cursor-pointer"
-            onClick={() => handleSelectStrategy(strategy.id)}
-          >
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-
-            <div className="p-8 flex-grow">
-              <div className="flex items-center gap-4 mb-6">
-                <span className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 group-hover:bg-indigo-50 group-hover:text-indigo-600 flex items-center justify-center text-lg font-bold border border-slate-100 group-hover:border-indigo-100 transition-colors">
-                  {idx + 1}
-                </span>
-                <h3 className="text-xl font-bold text-slate-900 leading-tight group-hover:text-indigo-700 transition-colors">
-                  {strategy.title}
-                </h3>
-              </div>
-              <p className="text-slate-600 leading-relaxed">
-                {strategy.description}
-              </p>
-            </div>
-
-            <div className="p-6 bg-slate-50/50 border-t border-slate-100 mt-auto">
-              <button className="w-full py-3 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl text-sm group-hover:bg-indigo-600 group-hover:text-white group-hover:border-transparent transition-all flex items-center justify-center gap-2 shadow-sm">
-                {t.btnSelect} <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="text-center">
-        <button onClick={handleReset} className="text-slate-400 hover:text-slate-600 text-sm font-medium">
-          {t.newGoal}
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderHistoryScreen = () => (
-    <div className="max-w-4xl mx-auto pt-8 space-y-10 animate-in fade-in duration-500">
-      <div className="text-center space-y-3">
-        <h2 className="text-3xl font-bold text-slate-900 flex items-center justify-center gap-3">
-          <History className="w-8 h-8 text-indigo-500" /> My Saved Plans
-        </h2>
-        <p className="text-slate-600 text-lg">Revisit and track your previously generated execution paths.</p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4">
-        {state.history.length === 0 ? (
-          <div className="bg-white p-12 rounded-3xl border border-slate-200 text-center space-y-4">
-            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto">
-              <Calendar className="w-8 h-8 text-slate-300" />
-            </div>
-            <p className="text-slate-400 font-medium">No saved plans yet. Start by defining a goal!</p>
-            <button
-              onClick={handleReset}
-              className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all"
-            >
-              Go to Planner
-            </button>
-          </div>
-        ) : (
-          state.history.map(plan => (
-            <div
-              key={plan.id}
-              onClick={() => {
-                setState(prev => ({
-                  ...prev,
-                  stage: 'PROCESS',
-                  description: plan.goal,
-                  selectedStrategyId: 'loaded',
-                  selectedPlanId: plan.id,
-                  strategies: [{
-                    id: 'loaded',
-                    title: plan.strategy_title,
-                    description: plan.strategy_description,
-                    plan: plan.plan_data,
-                  }],
-                  resources: plan.resources_data
-                }));
-              }}
-              className="bg-white p-6 rounded-2xl border border-slate-200 hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-100/30 transition-all cursor-pointer group"
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div className="space-y-1">
-                  <h3 className="text-xl font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{plan.strategy_title}</h3>
-                  <p className="text-slate-500 text-sm flex items-center gap-1.5">
-                    <Wand2 className="w-3.5 h-3.5" /> Goal: {plan.goal}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Created</span>
-                  <span className="text-sm font-medium text-slate-600 flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-slate-400" />
-                    {new Date(plan.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex gap-2 mt-4">
-                {plan.plan_data.slice(0, 3).map((item, i) => (
-                  <div key={i} className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                    <div
-                      className={`h-full bg-green-500 transition-all duration-1000 ${(item.type === 'single' ? item.step.isCompleted : item.group.steps.every(s => s.isCompleted)) ? 'w-full' : 'w-0'
-                        }`}
-                    />
-                  </div>
-                ))}
-                {plan.plan_data.length > 3 && <div className="text-[10px] font-bold text-slate-300">+{plan.plan_data.length - 3} MORE</div>}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="text-center pt-8">
-        <button onClick={handleReset} className="text-slate-400 hover:text-slate-600 text-sm font-medium">
-          ← Back to selection
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderProcessScreen = () => {
-    if (!activeStrategy || !activeStrategy.plan) return null;
-
-    const isPanelOpen = !!selectedResource;
-
-    return (
-      <div className="animate-in fade-in duration-500 pb-20">
-        <div className="max-w-7xl mx-auto mb-8 flex items-center justify-between">
-          <button
-            onClick={handleBackToSelection}
-            className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors font-medium text-sm px-4 py-2 rounded-full hover:bg-white border border-transparent hover:border-slate-200"
-          >
-            <ArrowLeft className="w-4 h-4" /> {t.btnBack}
-          </button>
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleCopyPlan}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 hover:border-indigo-200 hover:text-indigo-600 transition-all shadow-sm"
-            >
-              {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-              {copied ? t.copied : t.btnCopy}
-            </button>
-            <button
-              onClick={handleDownloadPlan}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 transition-all shadow-sm hover:shadow"
-            >
-              <Download className="w-4 h-4" />
-              {t.btnSave}
-            </button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative transition-all duration-300">
-          {/* Left Column: Process */}
-          <div className={`${isPanelOpen ? 'lg:col-span-8' : 'lg:col-span-12'} space-y-6 transition-all duration-500`}>
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-              <div className="p-8 border-b border-slate-100 bg-slate-50/30">
-                <div className="flex items-center gap-3 mb-3">
-                  <span className="px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold uppercase tracking-wider">{t.headerSelected}</span>
-                </div>
-                <h2 className="text-3xl font-bold text-slate-900 mb-3">{activeStrategy.title}</h2>
-                <p className="text-lg text-slate-600 leading-relaxed">{activeStrategy.description}</p>
-
-                {/* Tip is now shown here when panel is closed to guide user */}
-                {!isPanelOpen && (
-                  <div className="mt-4 flex items-center gap-2 text-sm text-slate-500 bg-blue-50/50 p-3 rounded-lg border border-blue-100/50 max-w-fit">
-                    <Layers className="w-4 h-4 text-blue-500" />
-                    <span>{t.resourceTip} <span className="font-semibold text-indigo-600">Blue Pills</span> {t.resourceTip3}</span>
-                  </div>
-                )}
-              </div>
-              <div className="p-8">
-                <div className="flex items-center gap-2 mb-8 text-slate-400 font-semibold uppercase text-xs tracking-wider">
-                  <Layers className="w-4 h-4" /> {t.headerRoadmap}
-                </div>
-                <StepList
-                  items={activeStrategy.plan}
-                  onExpandStep={(step) => handleExpandStep(step, activeStrategy.title)}
-                  onResourceClick={handleResourceClick}
-                  onToggleComplete={handleToggleComplete}
-                  onEditStep={handleEditStep}
-                  onRegenerateStep={handleRegenerateStep}
-                  labels={{
-                    expand: t.expand,
-                    collapse: t.collapse,
-                    simultaneous: t.simultaneous,
-                    edit: t.edit,
-                    regenerate: t.regenerate,
-                    save: t.save,
-                    cancel: t.cancel,
-                    postEditTitle: t.postEditTitle,
-                    actionJustSave: t.actionJustSave,
-                    actionSubsteps: t.actionSubsteps,
-                    actionFuture: t.actionFuture
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Resource Panel (Conditionally Rendered) */}
-          {isPanelOpen && (
-            <div className="lg:col-span-4">
-              <div className="sticky top-24">
-                <ResourcePanel
-                  resource={selectedResource}
-                  onResourceClick={handleResourceClick}
-                  onClose={() => setState(prev => ({ ...prev, selectedResourceId: null }))}
-                  labels={{
-                    acquisitionPlan: t.acquisitionPlan,
-                    generating: t.generating
-                  }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
 
   const activeStrategy = state.strategies.find(s => s.id === state.selectedStrategyId);
   const selectedResource = state.resources.find(r => r.id === state.selectedResourceId) || null;
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {renderHeader()}
+      <Header
+        t={t}
+        language={state.language}
+        stage={state.stage}
+        user={state.user}
+        handleReset={handleReset}
+        toggleLanguage={toggleLanguage}
+        onShowHistory={() => setState(prev => ({ ...prev, stage: 'HISTORY' }))}
+        onSignOut={() => { signOut(); setState(prev => ({ ...prev, user: null })); }}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+      />
+
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {state.stage === 'INPUT' && renderInputScreen()}
-        {state.stage === 'PROCESSING' && renderProcessingScreen()}
-        {state.stage === 'SELECTION' && renderSelectionScreen()}
-        {state.stage === 'PROCESS' && renderProcessScreen()}
-        {state.stage === 'HISTORY' && renderHistoryScreen()}
+        {state.stage === 'INPUT' && (
+          <InputScreen
+            t={t}
+            description={state.description}
+            quantification={state.quantification}
+            environment={state.environment}
+            error={state.error}
+            onDescriptionChange={(val) => setState(prev => ({ ...prev, description: val }))}
+            onQuantificationChange={(val) => setState(prev => ({ ...prev, quantification: val }))}
+            onEnvironmentChange={(val) => setState(prev => ({ ...prev, environment: val }))}
+            onGenerate={handleGenerate}
+          />
+        )}
+
+        {state.stage === 'PROCESSING' && (
+          <ProcessingScreen
+            t={t}
+            selectedStrategyId={state.selectedStrategyId}
+            loadingMessage={LOADING_MESSAGES[loadingMsgIndex]}
+          />
+        )}
+
+        {state.stage === 'SELECTION' && (
+          <SelectionScreen
+            t={t}
+            strategies={state.strategies}
+            handleSelectStrategy={handleSelectStrategy}
+            handleReset={handleReset}
+          />
+        )}
+
+        {state.stage === 'PROCESS' && (
+          <ProcessScreen
+            t={t}
+            activeStrategy={activeStrategy}
+            selectedResource={selectedResource}
+            copied={copied}
+            handleBackToSelection={handleBackToSelection}
+            handleCopyPlan={handleCopyPlan}
+            handleDownloadPlan={handleDownloadPlan}
+            handleResourceClick={handleResourceClick}
+            handleExpandStep={(step) => handleExpandStep(step, activeStrategy?.title || '')}
+            handleToggleComplete={handleToggleComplete}
+            handleEditStep={handleEditStep}
+            handleRegenerateStep={handleRegenerateStep}
+            onCloseResourcePanel={() => setState(prev => ({ ...prev, selectedResourceId: null }))}
+          />
+        )}
+
+        {state.stage === 'HISTORY' && (
+          <HistoryScreen
+            history={state.history}
+            onSelectPlan={(plan) => {
+              setState(prev => ({
+                ...prev,
+                stage: 'PROCESS',
+                description: plan.goal,
+                selectedStrategyId: 'loaded',
+                selectedPlanId: plan.id,
+                strategies: [{
+                  id: 'loaded',
+                  title: plan.strategy_title,
+                  description: plan.strategy_description,
+                  plan: plan.plan_data,
+                }],
+                resources: plan.resources_data
+              }));
+            }}
+            onGoToPlanner={handleReset}
+          />
+        )}
       </main>
 
       <AuthModal
